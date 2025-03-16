@@ -1,0 +1,58 @@
+#!/usr/bin/env elvish
+#
+# run seff on all output from sacct, with additional args passed to sacct
+
+use flag
+use math
+use str
+
+# these units match what ZFS uses
+var kibi = 1024
+var mebi = (math:pow $kibi 2)
+var gibi = (math:pow $kibi 3)
+var tebi = (math:pow $kibi 4)
+
+fn sacct-completed-jobs {
+  # work around the bad SLURM_TIME_FORMAT currently on eRI:
+  # /etc/profile.d/nesi.sh:export SLURM_TIME_FORMAT="%b %d %H:%M"
+  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json } | from-json | keep-if {|job| ==s $job[state][current] COMPLETED } (one)[jobs]
+}
+
+fn format-size {|n &p=$false|
+  if $p {
+    put $n
+  } elif (< $n $kibi) {
+    put "0"  # so small we don't care
+  } elif (< $n $mebi) {
+    put (printf "%dK" (math:round (/ $n $kibi)))
+  } elif (< $n $gibi) {
+    put (printf "%dM" (math:round (/ $n $mebi)))
+  } else {
+    put (printf "%dG" (math:round (/ $n $gibi)))
+  }
+}
+
+fn sacct-job-format {|job &p=$false|
+  var mem-requested = (* $mebi $job[required][memory])
+  var max-requested-tres = $job[steps][0][tres][requested][max]
+
+  var mem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] mem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
+  var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
+  var mem-efficiency = (math:round (* 100 (/ $mem-used $mem-requested)))
+
+  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &cpu-used=$cpu-used &mem-used=(format-size $mem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency]
+}
+
+fn filter-jobs {|&user=$nil|
+  put { keep-if {|job| or (eq $user $nil) (str:contains $job[association][user] $user) } }
+}
+
+fn values-to-json { var in = [(all)] ; if (== 1 (count $in)) { put $in[0] } else { put $in } | to-json }
+fn jtv { nu --no-config-file --no-history --no-std-lib --plugin-config /dev/null --stdin -c 'from json' }
+fn tv { values-to-json | jtv }
+
+fn main { |&a=$false &p=$false &u=""|
+  sacct-completed-jobs | (filter-jobs &user=(if $a { put $nil } elif (!=s $u "") { put $u } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv
+}
+
+flag:call $main~ $args

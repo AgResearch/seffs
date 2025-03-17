@@ -48,11 +48,14 @@ fn filter-jobs {|&user=$nil|
 }
 
 fn values-to-json { var in = [(all)] ; if (== 1 (count $in)) { put $in[0] } else { put $in } | to-json }
-fn jtv { nu --no-config-file --no-history --no-std-lib --plugin-config /dev/null --stdin -c 'from json' }
-fn tv { values-to-json | jtv }
+fn jtv {|@keys|
+   var nu_cmd = (if (> (count $keys) 0) { put 'from json | select -i '(str:join ' ' $keys) } else { put 'from json' })
+   nu --no-config-file --no-history --no-std-lib --plugin-config /dev/null --stdin -c $nu_cmd
+}
+fn tv {|@keys| values-to-json | jtv $@keys }
 
 fn main { |&a=$false &p=$false &u=""|
-  sacct-completed-jobs | (filter-jobs &user=(if $a { put $nil } elif (!=s $u "") { put $u } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv
+  sacct-completed-jobs | (filter-jobs &user=(if $a { put $nil } elif (!=s $u "") { put $u } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name mem-used mem-requested mem-efficiency
 }
 
 flag:call $main~ $args

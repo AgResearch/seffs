@@ -54,8 +54,17 @@ fn jtv {|@keys|
 }
 fn tv {|@keys| values-to-json | jtv $@keys }
 
-fn main { |&a=$false &p=$false &u=""|
-  sacct-completed-jobs | (filter-jobs &user=(if $a { put $nil } elif (!=s $u "") { put $u } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name mem-used mem-requested mem-efficiency
+fn main { |&all=$false &parsable=$false &user=""|
+  sacct-completed-jobs | (filter-jobs &user=(if $all { put $nil } elif (not-eq $user $nil) { put $user } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$parsable } | put [(all)] | tv id user name mem-used mem-requested mem-efficiency
 }
 
-flag:call $main~ $args
+var raw-opts args = (flag:parse-getopt $args [
+  [&short=h &long=help]
+  [&short=u &long=user &arg-required=$true]
+  [&short=a &long=all]
+  [&short=p &long=parsable]
+])
+
+var opts = (each {|opt| put [$opt[spec][long] $opt[arg]] } $raw-opts | make-map)
+
+main &all=(has-key $opts all) &parsable=(has-key $opts parsable) &user=(if (has-key $opts user) { put $opts[user] } else { put $nil })

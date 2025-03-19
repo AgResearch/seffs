@@ -32,15 +32,33 @@ fn format-size {|n &p=$false|
   }
 }
 
+fn format-seconds {|n &p=$false|
+  if $p {
+    put $n
+  } else {
+    var hours = (math:floor (/ $n 3600))
+    set n = (- $n (* $hours 3600))
+    var mins = (math:floor (/ $n 60))
+    var secs = (math:round (- $n (* $mins 60)))
+
+    put (printf "%02d:%02d:%02d" $hours $mins $secs)
+  }
+}
+
 fn sacct-job-format {|job &p=$false|
   var mem-requested = (* $mebi $job[required][memory])
-  var max-requested-tres = $job[steps][0][tres][requested][max]
+  var cpus-requested = $job[required][CPUs]
+  var step0 = $job[steps][0]
+  var max-requested-tres = $step0[tres][requested][max]
+  var elapsed = $step0[time][elapsed]
+  var cpu-utilized = $step0[time][total][seconds]
 
   var mem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] mem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
-  var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
+  # var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   var mem-efficiency = (math:round (* 100 (/ $mem-used $mem-requested)))
+  var cpu-efficiency = (math:round (* 100 (/ $cpu-utilized (* $cpus-requested $elapsed))))
 
-  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &cpu-used=$cpu-used &mem-used=(format-size $mem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency]
+  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency &cpus-requested=$cpus-requested &cpu-utilized=(format-seconds $cpu-utilized) &cpu-efficiency=$cpu-efficiency &wall-clock-time=(format-seconds $elapsed &p=$p)]
 }
 
 fn filter-jobs {|&user=$nil|
@@ -55,7 +73,7 @@ fn jtv {|@keys|
 fn tv {|@keys| values-to-json | jtv $@keys }
 
 fn main { |&all=$false &parsable=$false &user=""|
-  sacct-completed-jobs | (filter-jobs &user=(if $all { put $nil } elif (not-eq $user $nil) { put $user } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$parsable } | put [(all)] | tv id user name mem-used mem-requested mem-efficiency
+  sacct-completed-jobs | (filter-jobs &user=(if $all { put $nil } elif (not-eq $user $nil) { put $user } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$parsable } | put [(all)] | tv id user name mem-requested mem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency wall-clock-time
 }
 
 var raw-opts args = (flag:parse-getopt $args [

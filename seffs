@@ -12,10 +12,11 @@ var mebi = (math:pow $kibi 2)
 var gibi = (math:pow $kibi 3)
 var tebi = (math:pow $kibi 4)
 
-fn sacct-completed-jobs {
+fn sacct-completed-jobs {|days|
+  var start-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- $days 1))))
   # work around the bad SLURM_TIME_FORMAT currently on eRI:
   # /etc/profile.d/nesi.sh:export SLURM_TIME_FORMAT="%b %d %H:%M"
-  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json } | from-json | keep-if {|job| ==s $job[state][current] COMPLETED } (one)[jobs]
+  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json --starttime $start-time } | from-json | keep-if {|job| ==s $job[state][current] COMPLETED } (one)[jobs]
 }
 
 fn format-size {|n &p=$false|
@@ -65,13 +66,14 @@ fn sacct-job-format {|job &p=$false|
   var mem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] mem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   # var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   var mem-efficiency = (math:round (* 100 (/ $mem-used $mem-requested)))
-  var cpu-efficiency = (math:round (* 100 (/ $cpu-utilized (* $cpus-requested $elapsed))))
+  var cpu-elapsed = (* $cpus-requested $elapsed)
+  var cpu-efficiency = (if (> $cpu-elapsed 0) { put (math:round (* 100 (/ $cpu-utilized $cpu-elapsed))) } else { put 0 })
 
   put [&id=$job[job_id] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency &cpus-requested=$cpus-requested &cpu-utilized=(format-seconds $cpu-utilized) &cpu-efficiency=$cpu-efficiency &start=(format-timestamp $start &p=$p) &wall-clock-time=(format-seconds $elapsed &p=$p)]
 }
 
-fn filter-jobs {|&user=$nil|
-  put { keep-if {|job| or (eq $user $nil) (str:contains $job[association][user] $user) } }
+fn filter-jobs {|&user=$nil &name=$nil|
+  put { keep-if {|job| or (eq $user $nil) (str:contains $job[association][user] $user) } | keep-if {|job| or (eq $name $nil) (str:contains $job[name] $name) } }
 }
 
 fn values-to-json { var in = [(all)] ; if (== 1 (count $in)) { put $in[0] } else { put $in } | to-json }
@@ -81,17 +83,24 @@ fn jtv {|@keys|
 }
 fn tv {|@keys| values-to-json | jtv $@keys }
 
-fn main { |&all=$false &parsable=$false &user=""|
-  sacct-completed-jobs | (filter-jobs &user=(if $all { put $nil } elif (not-eq $user $nil) { put $user } else { put $E:USER })) | each {|job| sacct-job-format $job &p=$parsable } | put [(all)] | tv id user name start wall-clock-time mem-requested mem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency
+fn main { |raw-opts|
+  var opts = (each {|opt| put [$opt[spec][long] $opt[arg]] } $raw-opts | make-map)
+  var all = (has-key $opts all)
+  var p = (has-key $opts parsable)
+  var user = (if $all { put $nil } elif (has-key $opts user) { put $opts[user] } else { put $E:USER })
+  var days = (if (has-key $opts days) { put $opts[days] } else { put 1 })
+  var name = (if (has-key $opts name) { put $opts[name] } else { put $nil })
+
+  sacct-completed-jobs $days | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name start wall-clock-time mem-requested mem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency
 }
 
 var raw-opts args = (flag:parse-getopt $args [
   [&short=h &long=help]
   [&short=u &long=user &arg-required=$true]
   [&short=a &long=all]
+  [&short=n &long=name &arg-required=$true]
+  [&short=d &long=days &arg-required=$true]
   [&short=p &long=parsable]
 ])
 
-var opts = (each {|opt| put [$opt[spec][long] $opt[arg]] } $raw-opts | make-map)
-
-main &all=(has-key $opts all) &parsable=(has-key $opts parsable) &user=(if (has-key $opts user) { put $opts[user] } else { put $nil })
+main $raw-opts

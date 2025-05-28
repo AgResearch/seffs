@@ -86,13 +86,24 @@ fn tv {|@keys| values-to-json | jtv $@keys }
 
 fn main { |raw-opts|
   var opts = (each {|opt| put [$opt[spec][long] $opt[arg]] } $raw-opts | make-map)
+  var help = (has-key $opts help)
   var all = (has-key $opts all)
   var p = (has-key $opts parsable)
   var user = (if $all { put $nil } elif (has-key $opts user) { put $opts[user] } else { put $E:USER })
   var days = (if (has-key $opts days) { put $opts[days] } else { put 1 })
   var name = (if (has-key $opts name) { put $opts[name] } else { put $nil })
 
-  sacct-completed-jobs $days | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name start wall-clock-time mem-requested mem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency
+  if (has-key $opts help) {
+    echo 'usage: seffs <options>
+      --help                  - show this message
+      -a | --all              - show jobs for all users, otherwise just current user
+      -u | --user <username>  - show jobs for specified user
+      -d | --days <n>         - show jobs for last <n> days, otherwise just today
+      -p                      - show sizes in bytes
+    '
+  } else {
+    sacct-completed-jobs $days | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name start wall-clock-time mem-requested mem-used vmem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency
+  }
 }
 
 var raw-opts args = (flag:parse-getopt $args [

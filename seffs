@@ -64,12 +64,13 @@ fn sacct-job-format {|job &p=$false|
   var cpu-utilized = $step0[time][total][seconds]
 
   var mem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] mem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
+  var vmem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] vmem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   # var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   var mem-efficiency = (math:round (* 100 (/ $mem-used $mem-requested)))
   var cpu-elapsed = (* $cpus-requested $elapsed)
   var cpu-efficiency = (if (> $cpu-elapsed 0) { put (math:round (* 100 (/ $cpu-utilized $cpu-elapsed))) } else { put 0 })
 
-  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency &cpus-requested=$cpus-requested &cpu-utilized=(format-seconds $cpu-utilized) &cpu-efficiency=$cpu-efficiency &start=(format-timestamp $start &p=$p) &wall-clock-time=(format-seconds $elapsed &p=$p)]
+  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &vmem-used=(format-size $vmem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency &cpus-requested=$cpus-requested &cpu-utilized=(format-seconds $cpu-utilized) &cpu-efficiency=$cpu-efficiency &start=(format-timestamp $start &p=$p) &wall-clock-time=(format-seconds $elapsed &p=$p)]
 }
 
 fn filter-jobs {|&user=$nil &name=$nil|

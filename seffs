@@ -36,13 +36,26 @@ var other-job-states = [
   &RESIZING=$true        # Job is about to change size.
 ]
 
+fn sacct-or-nothing {|@args|
+  # sacct command may fail, so catch this
+  #
+  # work around the bad SLURM_TIME_FORMAT currently on eRI:
+  # /etc/profile.d/nesi.sh:export SLURM_TIME_FORMAT="%b %d %H:%M"
+  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" {
+    try {
+      sacct $@args
+    } catch e {
+      echo >&2 "warning: sacct failed, no jobs found"
+      echo '{ "jobs": [] }'
+    }
+  }
+}
+
 fn sacct-selected-jobs {|days &fail=$false|
   var start-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- $days 1))))
   var selected-job-states = (if $fail { put $failed-job-states } else { put $completed-job-states })
 
-  # work around the bad SLURM_TIME_FORMAT currently on eRI:
-  # /etc/profile.d/nesi.sh:export SLURM_TIME_FORMAT="%b %d %H:%M"
-  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json --starttime $start-time } | from-json | keep-if {|job| has-key $selected-job-states $job[state][current] } (one)[jobs]
+  sacct-or-nothing --json --starttime $start-time | from-json | keep-if {|job| has-key $selected-job-states $job[state][current] } (one)[jobs]
 }
 
 fn format-size {|n &p=$false|

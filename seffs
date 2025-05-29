@@ -45,17 +45,18 @@ fn sacct-or-nothing {|@args|
     try {
       sacct $@args
     } catch e {
-      echo >&2 "warning: sacct failed, no jobs found"
+      echo >&2 "warning: sacct failed, use --days and --end to narrow search scope"
       echo '{ "jobs": [] }'
     }
   }
 }
 
-fn sacct-selected-jobs {|days &fail=$false|
-  var start-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- $days 1))))
+fn sacct-selected-jobs {|days end &fail=$false|
+  var end-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- $end 1))))
+  var start-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- (+ $days $end) 1))))
   var selected-job-states = (if $fail { put $failed-job-states } else { put $completed-job-states })
 
-  sacct-or-nothing --json --starttime $start-time | from-json | keep-if {|job| has-key $selected-job-states $job[state][current] } (one)[jobs]
+  sacct-or-nothing --json --starttime $start-time --endtime $end-time | from-json | keep-if {|job| has-key $selected-job-states $job[state][current] } (one)[jobs]
 }
 
 fn format-size {|n &p=$false|
@@ -132,6 +133,7 @@ fn main { |raw-opts|
   var p = (has-key $opts parsable)
   var user = (if $all { put $nil } elif (has-key $opts user) { put $opts[user] } else { put $E:USER })
   var days = (if (has-key $opts days) { put $opts[days] } else { put 1 })
+  var end = (if (has-key $opts end) { put $opts[end] } else { put 0 })
   var name = (if (has-key $opts name) { put $opts[name] } else { put $nil })
 
   if (has-key $opts help) {
@@ -141,6 +143,7 @@ fn main { |raw-opts|
       -u | --user <username>  - show jobs for specified user
       -n | --name <job-name>  - show jobs whose name contains the specified text, otherwise all
       -d | --days <n>         - show jobs for last <n> days, otherwise just today
+      --end <n>               - set job filter endtime for <n> days ago, with --days counting back from this
       -f | --fail             - show failed jobs, otherwise just successfully completed ones
       -p                      - show sizes in bytes and times in seconds
     '
@@ -150,7 +153,7 @@ fn main { |raw-opts|
     var mem-eff-field = (if (has-key $opts fail) { put [] } else { put [mem-eff] })
     var cpu-eff-field = (if (has-key $opts fail) { put [] } else { put [cpu-eff] })
     var display-fields = [id $@state-field $@user-field name start elapsed mem-req mem-used vmem-used $@mem-eff-field cpu-req cpu-time $@cpu-eff-field]
-    sacct-selected-jobs $days &fail=$fail | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv $@display-fields
+    sacct-selected-jobs $days $end &fail=$fail | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv $@display-fields
   }
 }
 
@@ -161,6 +164,7 @@ var raw-opts args = (flag:parse-getopt $args [
   [&short=f &long=fail]
   [&short=n &long=name &arg-required=$true]
   [&short=d &long=days &arg-required=$true]
+  [&long=end &arg-required=$true]
   [&short=p &long=parsable]
 ])
 

@@ -12,11 +12,37 @@ var mebi = (math:pow $kibi 2)
 var gibi = (math:pow $kibi 3)
 var tebi = (math:pow $kibi 4)
 
-fn sacct-completed-jobs {|days|
+var failed-job-states = [
+  &BOOT_FAIL=$true       # Job terminated due to launch failure, typically due to a hardware failure (e.g. unable to boot the node or block and the job can not be requeued).
+  &DEADLINE=$true        # Job terminated on deadline.
+  &FAILED=$true          # Job terminated with non-zero exit code or other failure condition.
+  &NODE_FAIL=$true       # Job terminated due to failure of one or more allocated nodes.
+  &OUT_OF_MEMORY=$true   # Job experienced out of memory error.
+  &PREEMPTED=$true       # Job terminated due to preemption.
+  &REVOKED=$true         # Sibling was removed from cluster due to other cluster starting the job.
+  &SUSPENDED=$true       # Job has an allocation, but execution has been suspended and CPUs have been released for other jobs.
+  &TIMEOUT=$true         # Job terminated upon reaching its time limit.
+]
+
+var completed-job-states = [
+  &COMPLETED=$true       # Job has terminated all processes on all nodes with an exit code of zero.
+]
+
+var other-job-states = [
+  &CANCELLED=$true       # Job was explicitly cancelled by the user or system administrator.  The job may or may not have been initiated.
+  &PENDING=$true         # Job is awaiting resource allocation.
+  &RUNNING=$true         # Job currently has an allocation.
+  &REQUEUED=$true        # Job was requeued.
+  &RESIZING=$true        # Job is about to change size.
+]
+
+fn sacct-selected-jobs {|days &fail=$false|
   var start-time = (date +%Y-%m-%d -d @(- (date +%s) (* 86400 (- $days 1))))
+  var selected-job-states = (if $fail { put $failed-job-states } else { put $completed-job-states })
+
   # work around the bad SLURM_TIME_FORMAT currently on eRI:
   # /etc/profile.d/nesi.sh:export SLURM_TIME_FORMAT="%b %d %H:%M"
-  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json --starttime $start-time } | from-json | keep-if {|job| ==s $job[state][current] COMPLETED } (one)[jobs]
+  with E:SLURM_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S" { sacct --json --starttime $start-time } | from-json | keep-if {|job| has-key $selected-job-states $job[state][current] } (one)[jobs]
 }
 
 fn format-size {|n &p=$false|
@@ -55,22 +81,23 @@ fn format-timestamp {|epoch-secs &p=false|
 }
 
 fn sacct-job-format {|job &p=$false|
-  var mem-requested = (* $mebi $job[required][memory])
-  var cpus-requested = $job[required][CPUs]
+  var mem-req = (* $mebi $job[required][memory])
+  var cpu-req = $job[required][CPUs]
   var step0 = $job[steps][0]
   var max-requested-tres = $step0[tres][requested][max]
   var elapsed = $step0[time][elapsed]
   var start = $step0[time][start]
-  var cpu-utilized = $step0[time][total][seconds]
+  var cpu-time = $step0[time][total][seconds]
+  var exit-code = $job[exit_code]
 
   var mem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] mem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   var vmem-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] vmem} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
   # var cpu-used = (put $max-requested-tres | keep-if {|x| ==s $x[type] cpu} (all) | each {|tres| put $tres[count] } | put (all) (num 0) | take 1) # 0 is the default
-  var mem-efficiency = (math:round (* 100 (/ $mem-used $mem-requested)))
-  var cpu-elapsed = (* $cpus-requested $elapsed)
-  var cpu-efficiency = (if (> $cpu-elapsed 0) { put (math:round (* 100 (/ $cpu-utilized $cpu-elapsed))) } else { put 0 })
+  var mem-eff = (math:round (* 100 (/ $mem-used $mem-req)))
+  var cpu-elapsed = (* $cpu-req $elapsed)
+  var cpu-eff = (if (> $cpu-elapsed 0) { put (math:round (* 100 (/ $cpu-time $cpu-elapsed))) } else { put 0 })
 
-  put [&id=$job[job_id] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &vmem-used=(format-size $vmem-used &p=$p) &mem-requested=(format-size $mem-requested &p=$p) &mem-efficiency=$mem-efficiency &cpus-requested=$cpus-requested &cpu-utilized=(format-seconds $cpu-utilized) &cpu-efficiency=$cpu-efficiency &start=(format-timestamp $start &p=$p) &wall-clock-time=(format-seconds $elapsed &p=$p)]
+  put [&id=$job[job_id] &state=$job[state][current] &status=$exit-code[status] &rc=$exit-code[return_code] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &vmem-used=(format-size $vmem-used &p=$p) &mem-req=(format-size $mem-req &p=$p) &mem-eff=$mem-eff &cpu-req=$cpu-req &cpu-time=(format-seconds $cpu-time &p=$p) &cpu-eff=$cpu-eff &start=(format-timestamp $start &p=$p) &elapsed=(format-seconds $elapsed &p=$p)]
 }
 
 fn filter-jobs {|&user=$nil &name=$nil|
@@ -88,6 +115,7 @@ fn main { |raw-opts|
   var opts = (each {|opt| put [$opt[spec][long] $opt[arg]] } $raw-opts | make-map)
   var help = (has-key $opts help)
   var all = (has-key $opts all)
+  var fail = (has-key $opts fail)
   var p = (has-key $opts parsable)
   var user = (if $all { put $nil } elif (has-key $opts user) { put $opts[user] } else { put $E:USER })
   var days = (if (has-key $opts days) { put $opts[days] } else { put 1 })
@@ -95,14 +123,20 @@ fn main { |raw-opts|
 
   if (has-key $opts help) {
     echo 'usage: seffs <options>
-      --help                  - show this message
+      -h | --help             - show this message
       -a | --all              - show jobs for all users, otherwise just current user
       -u | --user <username>  - show jobs for specified user
       -d | --days <n>         - show jobs for last <n> days, otherwise just today
-      -p                      - show sizes in bytes
+      -f | --fail             - show failed jobs, otherwise just successfully completed ones
+      -p                      - show sizes in bytes and times in seconds
     '
   } else {
-    sacct-completed-jobs $days | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv id user name start wall-clock-time mem-requested mem-used vmem-used mem-efficiency cpus-requested cpu-utilized cpu-efficiency
+    var state-field = (if (has-key $opts fail) { put [state status rc] } else { put [] })
+    var user-field = (if (has-key $opts all) { put [user] } else { put [] })
+    var mem-eff-field = (if (has-key $opts fail) { put [] } else { put [mem-eff] })
+    var cpu-eff-field = (if (has-key $opts fail) { put [] } else { put [cpu-eff] })
+    var display-fields = [id $@state-field $@user-field name start elapsed mem-req mem-used vmem-used $@mem-eff-field cpu-req cpu-time $@cpu-eff-field]
+    sacct-selected-jobs $days &fail=$fail | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv $@display-fields
   }
 }
 
@@ -110,6 +144,7 @@ var raw-opts args = (flag:parse-getopt $args [
   [&short=h &long=help]
   [&short=u &long=user &arg-required=$true]
   [&short=a &long=all]
+  [&short=f &long=fail]
   [&short=n &long=name &arg-required=$true]
   [&short=d &long=days &arg-required=$true]
   [&short=p &long=parsable]

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+usage="usage: $(basename "$0") [--home] <nix-url>"
+app_dir=/agr/persist/apps/eri_rocky8/software
+modulefiles_dir=/agr/persist/apps/eri_rocky8/modules/all
+
+while true; do
+    case "$1" in
+    --home)
+        app_dir=$HOME/apps
+        modulefiles_dir=$HOME/modulefiles
+        ;;
+    --help)
+        echo >&2 "$usage"
+        exit
+        ;;
+    -*)
+        echo >&2 "$usage"
+        exit 1
+        ;;
+    *)
+        break
+        ;;
+    esac
+    shift
+done
+
+test $# == 1 || {
+    echo >&2 "$usage"
+    exit 1
+}
+
+nix_flake_url="$1"
+
+test -d "$app_dir" || {
+    echo >&2 "$usage"
+    echo >&2 "no such directory $app_dir"
+    exit 1
+}
+
+test -d "$modulefiles_dir" || {
+    echo >&2 "$usage"
+    echo >&2 "no such directory $modulefiles_dir"
+    exit 1
+}
+
+# Nix flake
+IFS='?' read -r repo query_string <<<"$nix_flake_url"
+
+package="seffs"
+version="${query_string##?*/}"
+
+echo "installing Nix flake $nix_flake_url as $package version $version into $app_dir with modulefile into $modulefiles_dir"
+
+package_dir="$app_dir/$package"
+test -d "$package_dir" || {
+    mkdir -p "$package_dir"
+}
+
+package_version_link="$package_dir/$version"
+
+# abort on error
+set -e
+
+nix build -o "$package_version_link" "$nix_flake_url"
+bin_dir="$package_version_link/bin"
+
+# create modulefile
+module_dir="$modulefiles_dir/$package"
+test -d "$module_dir" || mkdir -p "$module_dir"
+
+cat >"$module_dir/$version.lua" <<EOF
+help([==[
+
+Description
+===========
+Like `seff` but for multiple jobs.
+
+Default behaviour is to show all the user's own jobs from today.
+
+
+More information
+================
+ - Homepage: https://github.com/AgResearch/seffs
+]==])
+
+prepend_path("PATH", "${bin_dir}")
+EOF

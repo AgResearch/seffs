@@ -13,9 +13,7 @@
             inherit system;
           };
 
-          simple-seffs = pkgs.writeScriptBin "seffs" (builtins.readFile ./seffs);
-
-          wrapped-seffs = pkgs.stdenv.mkDerivation {
+          seffs = pkgs.stdenv.mkDerivation {
             name = "seffs";
 
             src = ./seffs;
@@ -43,7 +41,7 @@
             '';
           };
 
-          seffs = wrapped-seffs;
+          eri-install = pkgs.writeShellScriptBin "seffs-eri-install" (builtins.readFile ./eri/install);
 
         in
         with pkgs;
@@ -66,6 +64,11 @@
             default = {
               type = "app";
               program = "${seffs}/bin/seffs";
+            };
+
+            eri-install = {
+              type = "app";
+              program = "${eri-install}/bin/seffs-eri-install";
             };
           };
         }

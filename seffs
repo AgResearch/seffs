@@ -126,6 +126,7 @@ fn main { |raw-opts|
       -h | --help             - show this message
       -a | --all              - show jobs for all users, otherwise just current user
       -u | --user <username>  - show jobs for specified user
+      -n | --name <job-name>  - show jobs whose name contains the specified text, otherwise all
       -d | --days <n>         - show jobs for last <n> days, otherwise just today
       -f | --fail             - show failed jobs, otherwise just successfully completed ones
       -p                      - show sizes in bytes and times in seconds

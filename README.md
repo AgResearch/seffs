@@ -2,6 +2,10 @@
 
 Like `seff` but for multiple jobs.
 
+## Usage
+
+Use `seffs --help` to see full usage.
+
 Default behaviour is to show all the user's own jobs from today.
 
 ## Installation
@@ -37,14 +41,3 @@ To install in the user's home directory for testing:
 ```
 login-1$ nix run "${FLAKE_URI}#eri-install" -- --home $FLAKE_URI
 ```
-
-
-
-## Options
-
-Docs are somewhat missing, but these options are supported:
-
-- `-u <username>` - query another user's jobs, default is own jobs
-- `-a` - query all users jobs
-- `-d <n>` - query jobs from the last `n` days
-- `-n <job-name` - filter by job name

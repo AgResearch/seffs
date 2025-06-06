@@ -120,13 +120,15 @@ fn sacct-job-format {|job &p=$false|
     var cpu-elapsed = (* $cpu-req $elapsed)
     var cpu-eff = (if (> $cpu-elapsed 0) { put (math:round (* 100 (/ $cpu-time $cpu-elapsed))) } else { put 0 })
 
-    put [&id=$job[job_id] &state=$job[state][current] &status=$exit-code[status] &rc=$exit-code[return_code] &user=$job[user] &name=$job[name] &mem-used=(format-size $mem-used &p=$p) &vmem-used=(format-size $vmem-used &p=$p) &mem-req=(format-size $mem-req &p=$p) &mem-eff=$mem-eff &cpu-req=$cpu-req &cpu-time=(format-seconds $cpu-time &p=$p) &cpu-eff=$cpu-eff &start=(format-timestamp $start &p=$p) &elapsed=(format-seconds $elapsed &p=$p)]
+    put [&id=$job[job_id] &state=$job[state][current] &status=$exit-code[status] &rc=$exit-code[return_code] &user=$job[user] &name=$job[name] &comment=$job[comment][job] &mem-used=(format-size $mem-used &p=$p) &vmem-used=(format-size $vmem-used &p=$p) &mem-req=(format-size $mem-req &p=$p) &mem-eff=$mem-eff &cpu-req=$cpu-req &cpu-time=(format-seconds $cpu-time &p=$p) &cpu-eff=$cpu-eff &start=(format-timestamp $start &p=$p) &elapsed=(format-seconds $elapsed &p=$p)]
 
   }
 }
 
-fn filter-jobs {|&user=$nil &name=$nil|
-  put { keep-if {|job| or (eq $user $nil) (str:contains $job[user] $user) } | keep-if {|job| or (eq $name $nil) (str:contains $job[name] $name) } }
+fn filter-jobs {|&user=$nil &name=$nil &comment=$nil|
+  put { keep-if {|job| or (eq $user $nil) (str:contains $job[user] $user) } |
+    keep-if {|job| or (eq $name $nil) (str:contains $job[name] $name) } |
+    keep-if {|job| or (eq $comment $nil) (==s $comment "") (var job-comment = (or $job[comment][job] ""); str:contains $job-comment $comment) } }
 }
 
 fn values-to-json { var in = [(all)] ; if (== 1 (count $in)) { put $in[0] } else { put $in } | to-json }
@@ -146,6 +148,7 @@ fn main { |raw-opts|
   var days = (if (has-key $opts days) { put (num $opts[days]) } else { put (num 1) })
   var end = (if (has-key $opts end) { put (num $opts[end]) } else { put (num 0) })
   var name = (if (has-key $opts name) { put $opts[name] } else { put $nil })
+  var comment = (if (has-key $opts comment) { put $opts[comment] } else { put $nil })
 
   if (has-key $opts help) {
     echo 'usage: seffs <options>
@@ -153,6 +156,7 @@ fn main { |raw-opts|
       -a | --all              - show jobs for all users, otherwise just current user
       -u | --user <username>  - show jobs for specified user
       -n | --name <job-name>  - show jobs whose name contains the specified text, otherwise all
+      -c | --comment <comment-text>  - show jobs whose comment contains the specified text; -c "" to show all comments
       -d | --days <n>         - show jobs for last <n> days, otherwise just today
       --end <n>               - set job filter endtime for <n> days ago, with --days counting back from this
       -f | --fail             - show failed jobs, otherwise just successfully completed ones
@@ -163,8 +167,9 @@ fn main { |raw-opts|
     var user-field = (if (has-key $opts all) { put [user] } else { put [] })
     var mem-eff-field = (if (has-key $opts fail) { put [] } else { put [mem-eff] })
     var cpu-eff-field = (if (has-key $opts fail) { put [] } else { put [cpu-eff] })
-    var display-fields = [id $@state-field $@user-field name start elapsed mem-req mem-used vmem-used $@mem-eff-field cpu-req cpu-time $@cpu-eff-field]
-    sacct-selected-jobs $days $end &fail=$fail | (filter-jobs &user=$user &name=$name) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv $@display-fields
+    var comment-field = (if (has-key $opts comment) { put [comment] } else { put [] })
+    var display-fields = [id $@state-field $@user-field name $@comment-field start elapsed mem-req mem-used vmem-used $@mem-eff-field cpu-req cpu-time $@cpu-eff-field]
+    sacct-selected-jobs $days $end &fail=$fail | (filter-jobs &user=$user &name=$name &comment=$comment) | each {|job| sacct-job-format $job &p=$p } | put [(all)] | tv $@display-fields
   }
 }
 
@@ -174,6 +179,7 @@ var raw-opts args = (flag:parse-getopt $args [
   [&short=a &long=all]
   [&short=f &long=fail]
   [&short=n &long=name &arg-required=$true]
+  [&short=c &long=comment &arg-required=$true]
   [&short=d &long=days &arg-required=$true]
   [&long=end &arg-required=$true]
   [&short=p &long=parsable]

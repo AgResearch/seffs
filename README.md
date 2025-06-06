@@ -8,6 +8,9 @@ Use `seffs --help` to see full usage.
 
 Default behaviour is to show all the user's own jobs from today.
 
+Various options ara available for filtering by job attributes.  Of these, `-c` or `--comment` adds the job comment field to the output.
+To see all job comments without filtering, simply run with `-c ""`
+
 ## Installation
 
 Since this is an Elvish script it is best installed from its Nix flake.
